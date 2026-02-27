@@ -1,5 +1,5 @@
 var a2_CSJ_YW_9 = ee.FeatureCollection("projects/xjd-1-457815/assets/a_CSJ/MyProject/1_MyProject/a2_CSJ_YW_9"),
-    b1_CCD_1 = ee.ImageCollection("projects/ee-jdyszh-1/assets/b1_CCD_1"),
+    b1_CCD_1 = ee.ImageCollection("projects/ee-jdyszh-1/assets/b1_CCD_1"), 
     b1_CCD_2 = ee.ImageCollection("projects/ee-jdyszh-2/assets/b1_CCD_2"),
     b1_CCD_3 = ee.ImageCollection("projects/ee-jdyszh-3/assets/b1_CCD_3"),
     terrains = ee.Image("projects/ee-jdyszh-3/assets/terrains"),
