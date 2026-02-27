@@ -1,0 +1,663 @@
+var a2_CSJ_YW_9 = ee.FeatureCollection("projects/xjd-1-457815/assets/a_CSJ/MyProject/1_MyProject/a2_CSJ_YW_9"),
+    b1_CCD_1 = ee.ImageCollection("projects/ee-jdyszh-1/assets/b1_CCD_1"),
+    b1_CCD_2 = ee.ImageCollection("projects/ee-jdyszh-2/assets/b1_CCD_2"),
+    b1_CCD_3 = ee.ImageCollection("projects/ee-jdyszh-3/assets/b1_CCD_3"),
+    terrains = ee.Image("projects/ee-jdyszh-3/assets/terrains"),
+    lonlat = ee.Image("projects/ee-jdyszh-3/assets/lonlat"),
+    roi = ee.FeatureCollection("projects/xjd-1-457815/assets/a_CSJ/MyProject/1_MyProject/a1_CSJ_ZTFW_Buffer");
+
+//************************************************************************************************************************************************
+
+var utils = require('users/parevalo_bu/gee-ccdc-tools:ccdcUtilities/api') 
+
+//************************************************************************************************************************************************
+
+function prepareL89(image){
+  
+  var bandList = ['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'ST_B10'];
+  var nameList = ['BLUE', 'GREEN', 'RED', 'NIR', 'SWIR1', 'SWIR2', 'TEMP'];
+  var subBand = ['BLUE', 'GREEN', 'RED', 'NIR', 'SWIR1', 'SWIR2'];
+  
+  var opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2);
+  var thermalBand = image.select('ST_B10').multiply(0.00341802).add(149.0);
+  
+  var scaled = opticalBands.addBands(thermalBand, null, true).select(bandList).rename(nameList);
+  
+  var FillBitMask = (1 << 0);
+  var DilatedCloudBitMask = (1 << 1);
+  var CirrusBitMask = (1 << 2);
+  var CloudsBitMask = (1 << 3);
+  var CloudShadowBitMask = (1 << 4);
+  var SnowBitMask = (1 << 5);
+  
+  var qa = image.select("QA_PIXEL");
+  
+  var mask1 = qa.bitwiseAnd(FillBitMask).eq(0)
+         .and(qa.bitwiseAnd(DilatedCloudBitMask).eq(0))
+         .and(qa.bitwiseAnd(CirrusBitMask).eq(0))
+         .and(qa.bitwiseAnd(CloudsBitMask).eq(0))
+         .and(qa.bitwiseAnd(CloudShadowBitMask).eq(0))
+         .and(qa.bitwiseAnd(SnowBitMask).eq(0));
+  
+  var mask2 = image.select('QA_RADSAT').eq(0);
+  
+  var mask3 = scaled.select(subBand).reduce(ee.Reducer.min()).gt(0)
+  var mask4 = scaled.select(subBand).reduce(ee.Reducer.max()).lt(1) 
+  
+  var mask6 = scaled.select("BLUE").lte(0.2);
+
+  return ee.Image(image).addBands(scaled).updateMask(mask1.and(mask2).and(mask3).and(mask4).and(mask6));
+}
+
+//************************************************************************************************************************************************
+
+function prepareL457(image){
+  
+  var bandList = ['SR_B1','SR_B2','SR_B3','SR_B4','SR_B5','SR_B7','ST_B6'];
+  var nameList = ['BLUE', 'GREEN', 'RED', 'NIR', 'SWIR1', 'SWIR2', 'TEMP'];
+  var subBand = ['BLUE', 'GREEN', 'RED', 'NIR', 'SWIR1', 'SWIR2'];
+
+  var opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2);
+  var thermalBand = image.select('ST_B6').multiply(0.00341802).add(149.0);
+  var scaled = opticalBands.addBands(thermalBand, null, true).select(bandList)
+      .rename(nameList);
+  
+  var FillBitMask = (1 << 0);
+  var DilatedCloudBitMask = (1 << 1);
+  var CloudsBitMask = (1 << 3);
+  var CloudShadowBitMask = (1 << 4);
+  var SnowBitMask = (1 << 5);
+  
+  var qa = image.select("QA_PIXEL");
+  
+  var mask1 = qa.bitwiseAnd(FillBitMask).eq(0)
+         .and(qa.bitwiseAnd(DilatedCloudBitMask).eq(0))
+         .and(qa.bitwiseAnd(CloudsBitMask).eq(0))
+         .and(qa.bitwiseAnd(CloudShadowBitMask).eq(0))
+         .and(qa.bitwiseAnd(SnowBitMask).eq(0));
+  
+  var mask2 = image.select('QA_RADSAT').eq(0); 
+  
+  var mask3 = scaled.select(subBand).reduce(ee.Reducer.min()).gt(0)
+  var mask4 = scaled.select(subBand).reduce(ee.Reducer.max()).lt(1)
+  
+  var mask6 = scaled.select("BLUE").lte(0.2);
+  
+  return ee.Image(image).addBands(scaled).updateMask(mask1.and(mask2).and(mask3).and(mask4).and(mask6));
+}
+
+//************************************************************************************************************************************************
+
+function calculateIndices(img) {
+  var ndvi = img.expression(
+              '(N - R) / (N + R)', {
+              'B': img.select('BLUE'), 'G': img.select('GREEN'), 'R': img.select('RED'),
+              'N': img.select('NIR'), 'S1': img.select('SWIR1'), 'S2': img.select('SWIR2')
+            }).clamp(-1, 1).rename('NDVI');
+  
+  var evi = img.expression(
+              '2.5 * (N - R) / (N + 6 * R - 7.5 * B + 1)', {
+              'B': img.select('BLUE'), 'G': img.select('GREEN'), 'R': img.select('RED'),
+              'N': img.select('NIR'), 'S1': img.select('SWIR1'), 'S2': img.select('SWIR2')
+            }).clamp(-1, 1).rename('EVI');
+  
+  var savi = img.expression(
+              '(1.0 + 0.5) * (N - R) / (N + R + 0.5)', {
+              'B': img.select('BLUE'), 'G': img.select('GREEN'), 'R': img.select('RED'),
+              'N': img.select('NIR'), 'S1': img.select('SWIR1'), 'S2': img.select('SWIR2')
+            }).clamp(-1, 1).rename('SAVI');
+  
+  var msavi = img.expression(
+              '0.5 * (2.0 * N + 1 - (((2 * N + 1) ** 2) - 8 * (N - R)) ** 0.5)', {
+              'B': img.select('BLUE'), 'G': img.select('GREEN'), 'R': img.select('RED'),
+              'N': img.select('NIR'), 'S1': img.select('SWIR1'), 'S2': img.select('SWIR2')
+            }).clamp(-1, 1).rename('MSAVI');
+            
+  var lswi = img.expression(
+              '(N - S1) / (N + S1)', {
+              'B': img.select('BLUE'), 'G': img.select('GREEN'), 'R': img.select('RED'),
+              'N': img.select('NIR'), 'S1': img.select('SWIR1'), 'S2': img.select('SWIR2')
+            }).clamp(-1, 1).rename('LSWI');
+            
+  var nbr = img.expression(
+              '(N - S2) / (N + S2)', {
+              'B': img.select('BLUE'), 'G': img.select('GREEN'), 'R': img.select('RED'),
+              'N': img.select('NIR'), 'S1': img.select('SWIR1'), 'S2': img.select('SWIR2')
+            }).clamp(-1, 1).rename('NBR');
+
+  var nbr2 = img.expression(
+              '(S1 - S2) / (S1 + S2)', {
+              'B': img.select('BLUE'), 'G': img.select('GREEN'), 'R': img.select('RED'),
+              'N': img.select('NIR'), 'S1': img.select('SWIR1'), 'S2': img.select('SWIR2')
+            }).clamp(-1, 1).rename('NBR2');
+  
+  var mndwi = img.expression(
+              '(G - S1) / (G + S1)', {
+              'B': img.select('BLUE'), 'G': img.select('GREEN'), 'R': img.select('RED'),
+              'N': img.select('NIR'), 'S1': img.select('SWIR1'), 'S2': img.select('SWIR2')
+            }).clamp(-1, 1).rename('MNDWI');
+  
+  var ndwi = img.expression(
+              '(G - N) / (G + N)', {
+              'B': img.select('BLUE'), 'G': img.select('GREEN'), 'R': img.select('RED'),
+              'N': img.select('NIR'), 'S1': img.select('SWIR1'), 'S2': img.select('SWIR2')
+            }).clamp(-1, 1).rename('NDWI');
+  
+  var ndsvi = img.expression(
+              '(S1 - R) / (S1 + R)', {
+              'B': img.select('BLUE'), 'G': img.select('GREEN'), 'R': img.select('RED'),
+              'N': img.select('NIR'), 'S1': img.select('SWIR1'), 'S2': img.select('SWIR2')
+            }).clamp(-1, 1).rename('NDSVI');
+  
+  var ndsi = img.expression(
+              '(S2 - G) / (S2 + G)', {
+              'B': img.select('BLUE'), 'G': img.select('GREEN'), 'R': img.select('RED'),
+              'N': img.select('NIR'), 'S1': img.select('SWIR1'), 'S2': img.select('SWIR2')
+            }).clamp(-1, 1).rename('NDSI');
+  
+  var wi = img.expression(
+              '(S2 - R) / (S2 + R)', {
+              'B': img.select('BLUE'), 'G': img.select('GREEN'), 'R': img.select('RED'),
+              'N': img.select('NIR'), 'S1': img.select('SWIR1'), 'S2': img.select('SWIR2')
+            }).clamp(-1, 1).rename('WI');
+
+  return img.addBands([ndvi, evi, savi, msavi, lswi, nbr, nbr2, mndwi, ndwi, ndsvi, ndsi, wi]);
+}
+
+//************************************************************************************************************************************************
+
+function calcNDFI(image) {
+  /* Do spectral unmixing */
+  var gv = [.0500, .0900, .0400, .6100, .3000, .1000]
+  var shade = [0, 0, 0, 0, 0, 0]
+  var npv = [.1400, .1700, .2200, .3000, .5500, .3000]
+  var soil = [.2000, .3000, .3400, .5800, .6000, .5800]
+  var cloud = [.9000, .9600, .8000, .7800, .7200, .6500]
+  var cf = .1 // Not parameterized
+  var cfThreshold = ee.Image.constant(cf)
+  var unmixImage = ee.Image(image).unmix([gv, shade, npv, soil, cloud], true,true)
+                  .rename(['band_0', 'band_1', 'band_2','band_3','band_4'])
+  var newImage = ee.Image(image).addBands(unmixImage)
+  var mask = newImage.select('band_4').lt(cfThreshold)
+  var ndfi = ee.Image(unmixImage).expression(
+    '((GV / (1 - SHADE)) - (NPV + SOIL)) / ((GV / (1 - SHADE)) + NPV + SOIL)', {
+      'GV': ee.Image(unmixImage).select('band_0'),
+      'SHADE': ee.Image(unmixImage).select('band_1'),
+      'NPV': ee.Image(unmixImage).select('band_2'),
+      'SOIL': ee.Image(unmixImage).select('band_3')
+    })
+    
+  return ee.Image(newImage)
+        .addBands(ee.Image(ndfi).rename(['NDFI']))
+        .select(['band_0','band_1','band_2','band_3','NDFI'])
+        .rename(['GV','Shade','NPV','Soil','NDFI'])
+        //.updateMask(mask)
+  }
+
+//************************************************************************************************************************************************
+
+function renameWithSuffix(image, suffix) {
+  var newNames = image.bandNames().map(function(name) {
+    return ee.String(name).cat(suffix);
+  });
+  return image.rename(newNames);
+}
+
+//************************************************************************************************************************************************
+
+function tcTrans(image) {
+
+    // Calculate tasseled cap transformation
+    var brightness = image.expression(
+        '(L1 * B1) + (L2 * B2) + (L3 * B3) + (L4 * B4) + (L5 * B5) + (L6 * B6)',
+        {
+            'L1': image.select('BLUE'),
+            'B1': 0.2043,
+            'L2': image.select('GREEN'),
+            'B2': 0.4158,
+            'L3': image.select('RED'),
+            'B3': 0.5524,
+            'L4': image.select('NIR'),
+            'B4': 0.5741,
+            'L5': image.select('SWIR1'),
+            'B5': 0.3124,
+            'L6': image.select('SWIR2'),
+            'B6': 0.2303
+        }).rename('TCB');
+    var greenness = image.expression(
+        '(L1 * B1) + (L2 * B2) + (L3 * B3) + (L4 * B4) + (L5 * B5) + (L6 * B6)',
+        {
+            'L1': image.select('BLUE'),
+            'B1': -0.1603,
+            'L2': image.select('GREEN'),
+            'B2': -0.2819,
+            'L3': image.select('RED'),
+            'B3': -0.4934,
+            'L4': image.select('NIR'),
+            'B4': 0.7940,
+            'L5': image.select('SWIR1'),
+            'B5': -0.0002,
+            'L6': image.select('SWIR2'),
+            'B6': -0.1446
+        }).rename('TCG');
+    var wetness = image.expression(
+        '(L1 * B1) + (L2 * B2) + (L3 * B3) + (L4 * B4) + (L5 * B5) + (L6 * B6)',
+        {
+            'L1': image.select('BLUE'),
+            'B1': 0.0315,
+            'L2': image.select('GREEN'),
+            'B2': 0.2021,
+            'L3': image.select('RED'),
+            'B3': 0.3102,
+            'L4': image.select('NIR'),
+            'B4': 0.1594,
+            'L5': image.select('SWIR1'),
+            'B5': -0.6806,
+            'L6': image.select('SWIR2'),
+            'B6': -0.6109
+        }).rename('TCW');
+
+    return image.addBands([brightness, greenness, wetness])
+}
+
+//************************************************************************************************************************************************
+
+function maskS1Edge(image) {
+  var edge = image.lt(-30.0);
+  var mask = image.mask().and(edge.not());
+  return image.updateMask(mask);
+}
+
+//************************************************************************************************************************************************
+
+function normalizeImage(image, minMaxDict) {
+  var bandNames = image.bandNames();
+  var normBands = bandNames.map(function(name) {
+    name = ee.String(name);
+    var band = image.select(name);
+    var min = ee.Number(minMaxDict.get(name.cat('_min')));
+    var max = ee.Number(minMaxDict.get(name.cat('_max')));
+    return band.unitScale(min, max).rename(name);
+  });
+
+  return ee.ImageCollection.fromImages(normBands).toBands().rename(bandNames);
+}
+
+//************************************************************************************************************************************************
+
+function removeRadarBands(list) {
+  return list.filter(function(b) {
+    return Polarization_feature.indexOf(b) === -1;
+  });
+}
+
+//************************************************************************************************************************************************
+
+var L1_bandname  = ['SWIR1_PHASE', 'SWIR2_PHASE', 'GREEN_PHASE', 'RED_PHASE', 'latitude', 'slope', 'NDFI_25', 'longitude', 'NDFI_75', 'NDFI_50', 'pre', 'soil_type', 'pH_15_60cm', 'MNDWI_PHASE', 'sand_0_15cm', 'NBR_AMPLITUDE', 'sand_15_60cm', 'NBR2_p75', 'pH_0_15cm', 'silt_0_15cm', 'NBR2_p50', 'NDVI_stdDev', 'silt_15_60cm', 'EVI_stdDev', 'NBR_stdDev', 'LSWI_stdDev', 'NBR_PHASE', 'NDSVI_p50', 'NDVI_p75', 'NDVI_p50', 'NIR_p25', 'NIR_NDVImax', 'RED_stdDev', 'RED_AMPLITUDE', 'MNDWI_p50', 'BLUE_p75', 'NIR_p50', 'aspect', 'RED_p75', 'WI_p75', 'NIR_p75', 'NDWI_p75', 'DEM', 'WI_p25', 'GREEN_p75', 'BD_15_60cm', 'VH_p5', 'NDWI_stdDev', 'TCG_p50', 'RED_p50', 'NDSVI_stdDev', 'BLUE_MNDWImax', 'BLUE_p50', 'GREEN_p25', 'GREEN_p50', 'TCB_p25', 'NBR2_p25', 'BD_0_15cm', 'EVI_p50', 'NDVI_AMPLITUDE', 'NBR_p25', 'SWIR1_AMPLITUDE', 'BLUE_NDVImax', 'NBR_p50', 'clay_15_60cm', 'NDSI_stdDev', 'TCG_p25', 'NDSI_p50', 'NDVI_PHASE', 'BLUE_p25', 'TCB_p50', 'RED_p25', 'WI_stdDev', 'GREEN_MNDWImax', 'RED_NDVImax', 'BLUE_stdDev', 'clay_0_15cm', 'LSWI_p75', 'NIR_MNDWImax', 'VV_p5', 'TCB_p75', 'NIR_stdDev', 'NIR_PHASE', 'tmp', 'TCW_stdDev', 'NIR_AMPLITUDE', 'RED_MNDWImax', 'SWIR2_stdDev', 'NPV_25', 'GREEN_NDVImax', 'VH_mean', 'Soil_25', 'SWIR1_p50', 'Soil_75', 'GREEN_stdDev', 'MNDWI_AMPLITUDE', 'VH_stdDev', 'SWIR1_stdDev', 'OC_15_60cm', 'SWIR2_p50', 'OC_0_15cm', 'SWIR2_AMPLITUDE', 'Soil_50', 'GREEN_AMPLITUDE', 'LSWI_p50', 'LSWI_p25', 'NBR2_stdDev', 'SWIR2_MNDWImax', 'SWIR1_MNDWImax', 'VH_p95', 'TCW_p75', 'VV_mean', 'NIR_p50_ent_W9', 'NIR_p50_idm_W9', 'NPV_50', 'NIR_p50_idm_W7', 'VV_p95']
+var L2A_bandname = ['NDVI_p75', 'NDVI_p50', 'NBR2_p75', 'NDSVI_p50', 'NBR2_p50', 'NDWI_p75', 'MNDWI_p50', 'EVI_p50', 'NBR_p50', 'TCG_p50', 'NBR2_p25', 'EVI_stdDev', 'NIR_p75', 'slope', 'WI_p75', 'LSWI_p75', 'RED_PHASE', 'LSWI_p50', 'SWIR2_PHASE', 'NDFI_25', 'NBR_p25', 'NDFI_50', 'NIR_p50', 'NBR_stdDev', 'TCG_p25', 'NDVI_stdDev', 'latitude', 'longitude', 'NDFI_75', 'BLUE_NDVImax', 'LSWI_stdDev', 'NBR_AMPLITUDE', 'BLUE_p25', 'NIR_NDVImax', 'BLUE_p50', 'NIR_p25', 'NDVI_AMPLITUDE', 'pre', 'soil_type', 'BLUE_p75', 'LSWI_p25', 'RED_NDVImax', 'NIR_AMPLITUDE', 'WI_p25', 'GREEN_PHASE', 'NIR_stdDev', 'NPV_25', 'RED_p25', 'Soil_25', 'aspect', 'RED_p50', 'VH_p5', 'GREEN_p25', 'DEM', 'RED_p75', 'sand_0_15cm', 'pH_15_60cm', 'NBR_PHASE', 'NDWI_stdDev', 'BLUE_MNDWImax', 'GREEN_NDVImax', 'GREEN_p50', 'Soil_50', 'GREEN_p75', 'VV_p5', 'pH_0_15cm', 'NPV_50', 'SWIR1_PHASE', 'silt_0_15cm', 'VH_mean', 'tmp', 'sand_15_60cm', 'RED_stdDev', 'silt_15_60cm', 'Soil_75', 'NDSI_p50', 'SWIR2_p50', 'NBR2_stdDev', 'NIR_MNDWImax', 'SWIR1_p50', 'GREEN_MNDWImax', 'TCW_p75', 'VV_mean', 'BLUE_stdDev', 'VV_p95', 'TCB_p25', 'VH_p95', 'RED_MNDWImax', 'TCB_p50', 'NPV_75', 'TCB_p75', 'MNDWI_PHASE', 'NDSVI_stdDev', 'SWIR1_AMPLITUDE', 'GREEN_stdDev', 'OC_0_15cm', 'NIR_p50_idm_W9', 'SWIR2_AMPLITUDE', 'SWIR1_MNDWImax', 'OC_15_60cm', 'VH_stdDev', 'MNDWI_AMPLITUDE', 'SWIR2_NDVImax', 'WI_stdDev', 'NIR_p50_idm_W7', 'SWIR2_stdDev', 'NIR_p50_corr_W9', 'RED_AMPLITUDE', 'NIR_p50_ent_W9', 'NIR_p50_corr_W7']
+var L2B_bandname = ['WI_p25', 'NDVI_p75', 'EVI_p50', 'VH_p5', 'NDVI_p50', 'NDWI_p75', 'NDSI_stdDev', 'TCG_p50', 'NDVI_PHASE', 'VH_mean', 'NIR_p25', 'WI_stdDev', 'MNDWI_PHASE', 'NIR_PHASE', 'NDSVI_stdDev', 'NIR_p75', 'MNDWI_AMPLITUDE', 'MNDWI_p50', 'NIR_p50', 'TCB_p25', 'VV_p5', 'NDSVI_p50', 'SWIR1_MNDWImax', 'NDSI_p50', 'TCG_p25', 'TCW_p75', 'NIR_NDVImax', 'RED_NDVImax', 'NDFI_25', 'GREEN_PHASE', 'soil_type', 'SWIR1_p50', 'EVI_stdDev', 'RED_PHASE', 'WI_p75', 'RED_p25', 'aspect', 'NIR_MNDWImax', 'TCB_p50', 'sand_15_60cm', 'NDVI_AMPLITUDE', 'GREEN_p25', 'BLUE_p25', 'VH_p95', 'VV_mean', 'SWIR2_MNDWImax', 'longitude', 'RED_p50', 'GREEN_NDVImax', 'NDFI_75', 'NBR2_p50', 'RED_AMPLITUDE', 'NDWI_stdDev', 'NBR2_p75', 'NBR_PHASE', 'latitude', 'NDVI_stdDev', 'SWIR1_AMPLITUDE', 'BLUE_NDVImax', 'SWIR1_PHASE', 'VV_stdDev', 'pre', 'TCB_p75', 'tmp', 'GREEN_p50', 'BLUE_p50', 'BLUE_MNDWImax', 'sand_0_15cm', 'VH_stdDev', 'SWIR2_p50', 'NDFI_50', 'GREEN_AMPLITUDE', 'NIR_stdDev', 'NBR_AMPLITUDE', 'RED_stdDev', 'SWIR2_PHASE', 'NBR_p50', 'Soil_50', 'SWIR2_AMPLITUDE', 'NIR_AMPLITUDE', 'silt_0_15cm', 'silt_15_60cm', 'LSWI_p50', 'LSWI_p75', 'BLUE_stdDev', 'BD_15_60cm', 'RED_p75', 'NBR_p25', 'LSWI_stdDev', 'NPV_50', 'NIR_p50_idm_W3', 'GREEN_stdDev', 'Soil_75', 'NIR_p50_corr_W9', 'NIR_p50_idm_W5', 'GREEN_MNDWImax', 'RED_MNDWImax', 'NBR2_p25', 'NPV_25', 'NIR_p50_idm_W7', 'NIR_p50_idm_W9', 'NIR_p50_ent_W5', 'GREEN_p75', 'LSWI_p25', 'OC_0_15cm', 'pH_15_60cm', 'SWIR2_NDVImax', 'SWIR1_NDVImax', 'NIR_p50_corr_W7', 'NIR_p50_ent_W3', 'NPV_75', 'NBR_stdDev', 'OC_15_60cm', 'NIR_p50_ent_W9', 'Soil_25', 'TCB_stdDev']
+var L3_bandname  = ['latitude', 'pre', 'LSWI_stdDev', 'NBR_stdDev', 'slope', 'GREEN_p75', 'RED_p75', 'GREEN_PHASE', 'SWIR2_PHASE', 'BLUE_p75', 'soil_type', 'pH_15_60cm', 'TCW_stdDev', 'pH_0_15cm', 'RED_stdDev', 'NBR2_p25', 'longitude', 'NDVI_stdDev', 'NBR2_p50', 'SWIR2_stdDev', 'NBR2_p75', 'RED_PHASE', 'NDSVI_p50', 'GREEN_p50', 'NBR_p25', 'TCB_p25', 'NBR_PHASE', 'NDVI_p50', 'VH_p5', 'BLUE_p50', 'TCB_p50', 'GREEN_p25', 'LSWI_p75', 'NDWI_p75', 'RED_p50', 'RED_p25', 'SWIR1_PHASE', 'NIR_p25', 'LSWI_p25', 'NDVI_p75', 'BLUE_p25', 'TCB_p75', 'NDFI_75', 'NBR_p50', 'SWIR1_stdDev', 'BLUE_stdDev', 'Soil_75', 'VV_p5', 'GREEN_stdDev', 'VH_stdDev', 'VV_stdDev', 'DEM', 'OC_0_15cm', 'NIR_p50', 'NDFI_25', 'NDWI_stdDev', 'SWIR2_p50', 'NPV_25', 'LSWI_p50', 'EVI_stdDev', 'VH_mean', 'NDVI_PHASE', 'OC_15_60cm', 'aspect', 'MNDWI_p50', 'sand_0_15cm', 'NIR_MNDWImax', 'TCG_p50', 'SWIR1_p50', 'NIR_AMPLITUDE', 'NDFI_50', 'silt_0_15cm', 'NBR_AMPLITUDE', 'TCW_p75', 'NIR_p75', 'WI_p75', 'EVI_p50', 'TCG_p25', 'NDVI_AMPLITUDE', 'sand_15_60cm', 'SWIR2_AMPLITUDE', 'RED_NDVImax', 'NPV_50', 'VV_mean', 'Soil_50', 'silt_15_60cm', 'GREEN_NDVImax', 'NIR_NDVImax', 'NIR_p50_idm_W9', 'BLUE_MNDWImax', 'SWIR1_NDVImax', 'RED_MNDWImax', 'GREEN_MNDWImax', 'NIR_p50_ent_W9', 'SWIR1_AMPLITUDE', 'BLUE_NDVImax', 'SWIR2_MNDWImax', 'NIR_p50_idm_W7', 'VH_p95', 'Soil_25', 'SWIR2_NDVImax', 'SWIR1_MNDWImax', 'NPV_75', 'NIR_p50_idm_W5', 'RED_AMPLITUDE', 'tmp', 'VV_p95', 'NIR_PHASE', 'WI_p25', 'clay_15_60cm', 'NIR_stdDev', 'NIR_p50_contrast_W9', 'MNDWI_AMPLITUDE']
+var L4A_bandname = ['NBR_PHASE', 'NBR_stdDev', 'LSWI_stdDev', 'NDVI_AMPLITUDE', 'NBR_AMPLITUDE', 'TCB_p75', 'aspect', 'slope', 'TCB_p50', 'NIR_p75', 'GREEN_p75', 'soil_type', 'SWIR2_PHASE', 'latitude', 'GREEN_p50', 'longitude', 'RED_p75', 'TCB_p25', 'NIR_NDVImax', 'TCW_stdDev', 'EVI_stdDev', 'NIR_p25', 'SWIR2_AMPLITUDE', 'GREEN_p25', 'NDVI_stdDev', 'RED_PHASE', 'NBR_p25', 'SWIR1_p50', 'BLUE_p50', 'RED_p50', 'BLUE_p75', 'SWIR1_AMPLITUDE', 'NIR_p50', 'DEM', 'RED_p25', 'LSWI_p25', 'NIR_AMPLITUDE', 'NIR_stdDev', 'BLUE_p25', 'TCG_p25', 'NPV_25', 'SWIR1_stdDev', 'NDFI_25', 'TCG_p50', 'EVI_p50', 'SWIR1_NDVImax', 'RED_AMPLITUDE', 'NBR2_p25', 'GREEN_NDVImax', 'NDVI_PHASE', 'GREEN_PHASE', 'OC_15_60cm', 'NDWI_stdDev', 'Soil_75', 'GREEN_AMPLITUDE', 'OC_0_15cm', 'SWIR2_p50', 'Soil_25', 'TCW_p75', 'pH_15_60cm', 'SWIR2_NDVImax', 'pre', 'BD_15_60cm', 'VH_p5', 'NDWI_p75', 'sand_0_15cm', 'NDSVI_p50', 'sand_15_60cm', 'WI_p75', 'VH_mean', 'Soil_50', 'RED_NDVImax', 'MNDWI_AMPLITUDE', 'BD_0_15cm', 'tmp', 'NDSI_p50', 'SWIR2_stdDev', 'VV_mean', 'silt_0_15cm', 'VH_p95', 'BLUE_MNDWImax', 'clay_15_60cm', 'VV_p95', 'SWIR1_PHASE', 'BLUE_NDVImax', 'MNDWI_p50', 'TCB_stdDev', 'NIR_MNDWImax', 'NDFI_75', 'NDVI_p50', 'SWIR1_MNDWImax', 'LSWI_p50', 'VV_p5', 'LSWI_p75', 'NDSI_stdDev', 'NPV_50', 'pH_0_15cm', 'silt_15_60cm', 'MNDWI_PHASE', 'clay_0_15cm', 'NBR2_p50', 'NBR_p50', 'NDVI_p75', 'GREEN_MNDWImax', 'WI_p25', 'NPV_75', 'NIR_p50_corr_W5', 'SWIR2_MNDWImax', 'NBR2_stdDev', 'RED_MNDWImax', 'NIR_PHASE', 'NIR_p50_idm_W5', 'NDFI_50', 'RED_stdDev', 'WI_stdDev', 'NIR_p50_idm_W3']
+var L4B_bandname = ['NPV_25', 'NPV_50', 'NDFI_25', 'SWIR1_PHASE', 'LSWI_p75', 'VV_stdDev', 'SWIR2_PHASE', 'LSWI_p50', 'longitude', 'pre', 'LSWI_stdDev', 'slope', 'TCW_stdDev', 'NBR_p50', 'GREEN_PHASE', 'NDFI_50', 'TCW_p75', 'SWIR1_stdDev', 'latitude', 'SWIR2_stdDev', 'TCG_p50', 'VH_stdDev', 'soil_type', 'NDVI_p50', 'NIR_p50', 'EVI_p50', 'NBR_PHASE', 'NIR_p25', 'NDVI_AMPLITUDE', 'BLUE_p25', 'RED_stdDev', 'RED_PHASE', 'NDVI_p75', 'pH_0_15cm', 'SWIR1_NDVImax', 'GREEN_stdDev', 'NIR_p75', 'NPV_75', 'NBR_stdDev', 'GREEN_p25', 'pH_15_60cm', 'RED_p25', 'LSWI_p25', 'NIR_AMPLITUDE', 'VV_p5', 'NDVI_PHASE', 'SWIR2_NDVImax', 'VH_p5', 'SWIR1_AMPLITUDE', 'clay_15_60cm', 'BLUE_MNDWImax', 'SWIR1_p50', 'NIR_MNDWImax', 'sand_0_15cm', 'SWIR2_p50', 'NBR2_p50', 'BLUE_p50', 'tmp', 'NBR_AMPLITUDE', 'NIR_NDVImax', 'RED_AMPLITUDE', 'Soil_50', 'BLUE_stdDev', 'TCG_p25', 'sand_15_60cm', 'GREEN_NDVImax', 'RED_p50', 'NDVI_stdDev', 'NBR_p25', 'clay_0_15cm', 'VH_mean', 'NDSVI_p50', 'EVI_stdDev', 'MNDWI_AMPLITUDE', 'TCB_stdDev', 'NDFI_75', 'silt_15_60cm', 'RED_NDVImax', 'TCB_p25', 'NDSI_p50', 'OC_0_15cm', 'GREEN_p50', 'NBR2_p75', 'NDWI_stdDev', 'Soil_75', 'MNDWI_p50', 'GREEN_p75', 'NDWI_p75', 'VV_mean', 'OC_15_60cm', 'TCB_p75', 'NIR_PHASE', 'MNDWI_PHASE', 'GREEN_AMPLITUDE', 'BLUE_NDVImax', 'silt_0_15cm', 'RED_p75', 'DEM', 'NBR2_stdDev', 'SWIR2_AMPLITUDE', 'Soil_25', 'GREEN_MNDWImax', 'SWIR2_MNDWImax', 'VH_p95', 'NBR2_p25', 'TCB_p50', 'VV_p95', 'SWIR1_MNDWImax', 'aspect']
+var L4C_bandname = ['slope', 'soil_type', 'longitude', 'latitude', 'sand_0_15cm', 'VH_p5', 'pre', 'NBR_PHASE', 'sand_15_60cm', 'silt_15_60cm', 'SWIR2_PHASE', 'VH_mean', 'silt_0_15cm', 'NDFI_75', 'VV_p5', 'NDFI_25', 'NDFI_50', 'pH_15_60cm', 'RED_p50', 'RED_p75', 'RED_PHASE', 'DEM', 'VH_p95', 'BLUE_MNDWImax', 'RED_p25', 'NDVI_p50', 'NIR_p50_corr_W9', 'TCB_p50', 'pH_0_15cm', 'tmp', 'GREEN_PHASE', 'VV_mean', 'SWIR1_p50', 'TCB_p75', 'NIR_p50', 'NIR_p75', 'NDVI_p75', 'GREEN_p25', 'VV_p95', 'TCB_p25', 'WI_p75', 'NIR_p25', 'NIR_AMPLITUDE', 'GREEN_p50', 'aspect', 'NBR2_p75', 'SWIR1_PHASE', 'LSWI_p50', 'NPV_50', 'NIR_p50_corr_W7', 'GREEN_p75', 'NIR_NDVImax', 'NDSVI_p50', 'SWIR1_AMPLITUDE', 'MNDWI_p50', 'LSWI_p25', 'GREEN_MNDWImax', 'LSWI_p75', 'MNDWI_AMPLITUDE', 'SWIR2_p50', 'TCW_p75', 'WI_p25', 'NBR2_p50', 'SWIR2_AMPLITUDE', 'NPV_25', 'NDSI_p50', 'NIR_p50_idm_W9', 'NPV_75', 'NDWI_p75', 'NIR_p50_idm_W7', 'RED_NDVImax', 'NBR_p50', 'NDVI_AMPLITUDE', 'RED_MNDWImax', 'NIR_p50_idm_W5', 'BLUE_p75', 'NBR2_p25', 'Soil_25', 'TCG_p50', 'NIR_p50_ent_W9', 'NIR_MNDWImax', 'NBR_p25', 'MNDWI_PHASE', 'NIR_p50_ent_W5', 'Soil_50', 'NIR_stdDev', 'NIR_p50_idm_W3', 'BLUE_p50', 'BLUE_stdDev', 'RED_AMPLITUDE', 'NDVI_stdDev', 'RED_stdDev', 'Soil_75', 'NDWI_stdDev', 'NIR_p50_corr_W5', 'BLUE_p25', 'GREEN_AMPLITUDE', 'GREEN_NDVImax', 'SWIR1_MNDWImax', 'TCG_p25', 'NBR_AMPLITUDE', 'NIR_p50_ent_W3', 'SWIR2_MNDWImax', 'BLUE_NDVImax', 'OC_15_60cm', 'TCB_stdDev', 'EVI_p50', 'GREEN_stdDev', 'VH_stdDev', 'clay_15_60cm', 'OC_0_15cm', 'SWIR1_NDVImax', 'NDSI_stdDev', 'NDVI_PHASE', 'EVI_stdDev', 'NDSVI_stdDev', 'NIR_p50_diss_W3', 'NBR_stdDev']
+var L4D_bandname = ['SWIR1_PHASE', 'soil_type', 'NPV_50', 'sand_15_60cm', 'longitude', 'silt_15_60cm', 'NPV_25', 'silt_0_15cm', 'VH_p5', 'sand_0_15cm', 'pH_15_60cm', 'BD_15_60cm', 'pre', 'pH_0_15cm', 'latitude', 'LSWI_p50', 'SWIR2_PHASE', 'NIR_p50', 'BD_0_15cm', 'TCG_p50', 'clay_0_15cm', 'clay_15_60cm', 'RED_stdDev', 'EVI_p50', 'VH_mean', 'NBR_AMPLITUDE', 'LSWI_p75', 'tmp', 'NIR_p25', 'BLUE_MNDWImax', 'NDVI_AMPLITUDE', 'SWIR2_stdDev', 'NBR_p50', 'MNDWI_PHASE', 'NIR_p75', 'GREEN_NDVImax', 'TCB_p25', 'TCW_stdDev', 'NDFI_25', 'RED_NDVImax', 'RED_AMPLITUDE', 'Soil_50', 'VV_p5', 'GREEN_AMPLITUDE', 'aspect', 'NDVI_p75', 'NDFI_50', 'NDVI_p50', 'OC_0_15cm', 'GREEN_stdDev', 'BLUE_stdDev', 'GREEN_MNDWImax', 'TCB_p50', 'GREEN_PHASE', 'SWIR1_MNDWImax', 'MNDWI_AMPLITUDE', 'NIR_AMPLITUDE', 'NIR_MNDWImax', 'SWIR1_NDVImax', 'LSWI_p25', 'VH_p95', 'SWIR2_AMPLITUDE', 'TCG_p25', 'SWIR1_stdDev', 'DEM', 'VV_mean', 'VH_stdDev', 'RED_MNDWImax', 'RED_p50', 'NPV_75', 'TCB_p75', 'NIR_PHASE', 'NBR2_p50', 'NBR_p25', 'TCW_p75', 'Soil_75', 'BLUE_NDVImax', 'SWIR1_AMPLITUDE', 'NDFI_75', 'NDSVI_stdDev', 'NBR_PHASE', 'EVI_stdDev', 'RED_p25', 'NDSI_stdDev', 'BLUE_p25', 'WI_p25', 'RED_p75', 'Soil_25', 'SWIR2_MNDWImax', 'NDVI_PHASE', 'NIR_NDVImax', 'LSWI_stdDev', 'NBR2_p75', 'NDWI_p75', 'SWIR2_p50', 'WI_stdDev', 'SWIR1_p50', 'BLUE_p50', 'NDWI_stdDev', 'GREEN_p50', 'NIR_p50_var_W9', 'NIR_stdDev', 'NDVI_stdDev', 'VV_stdDev', 'NBR_stdDev', 'SWIR2_NDVImax', 'RED_PHASE', 'GREEN_p75', 'WI_p75', 'NDSI_p50', 'GREEN_p25', 'NIR_p50_idm_W9', 'NIR_p50_corr_W9', 'NIR_p50_idm_W7', 'NIR_p50_idm_W3', 'NIR_p50_idm_W5']
+
+var Polarization_feature = ["VV_p5", "VV_p95", "VH_p5", "VH_p95", "VV_mean", "VH_mean", "VV_stdDev", "VH_stdDev"];
+
+/*
+print('L1_bandname_filtered:',  removeRadarBands(L1_bandname));
+print('L2A_bandname_filtered:', removeRadarBands(L2A_bandname));
+print('L2B_bandname_filtered:', removeRadarBands(L2B_bandname));
+print('L3_bandname_filtered:',  removeRadarBands(L3_bandname));
+print('L4A_bandname_filtered:', removeRadarBands(L4A_bandname));
+print('L4B_bandname_filtered:', removeRadarBands(L4B_bandname));
+print('L4C_bandname_filtered:', removeRadarBands(L4C_bandname));
+print('L4D_bandname_filtered:', removeRadarBands(L4D_bandname));
+*/
+
+//************************************************************************************************************************************************
+
+var resultDict = {};
+
+function runModelSet(year, allLevels) {
+  
+  var training = ee.FeatureCollection("projects/xjd-1-457815/assets/a_CSJ/i/i9/i9_1_training_" + year);
+  
+  var stats = ee.FeatureCollection("projects/xjd-1-457815/assets/a_CSJ/i/i9/i9_2_minMax_" + year);
+  
+  var training_GYH = ee.FeatureCollection("projects/xjd-1-457815/assets/a_CSJ/i/i9/i9_3_training_GYH_" + year);
+  
+  //print(stats)
+  //print(training.limit(1))
+  //print(training_GYH.limit(1))
+  
+  //************************************************************************************************************************************************
+  
+  var year_start = (Number(year) >= 2015) ? (year     + '-01-01') :
+                   (Number(year) >= 1990) ? (year - 1 + '-01-01') :
+                   (Number(year) == 1985) ? (year - 2 + '-01-01') :
+                   null;
+  
+  var year_end   = (Number(year) >= 2015) ? (year     + '-12-31') :
+                   (Number(year) >= 1990) ? (year + 1 + '-12-31') :
+                   (Number(year) == 1985) ? (year + 2 + '-12-31') :
+                   null;
+  
+  var year_ccd   = year + '-07-15'
+  /*
+  print(year_start)
+  print(year_end)
+  print(year_ccd)
+  */
+  //************************************************************************************************************************************************
+  
+  var opticalBands  = ['BLUE.*', 'GREEN.*', 'RED.*', 'NIR.*', 'SWIR1.*', 'SWIR2.*']
+  
+  //************************************************************************************************************************************************
+  
+  var Landsat = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').map(prepareL89)
+         .merge(ee.ImageCollection('LANDSAT/LC08/C02/T1_L2').map(prepareL89))
+         .merge(ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').map(prepareL457))
+         .merge(ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').map(prepareL457))
+         .merge(ee.ImageCollection('LANDSAT/LT04/C02/T1_L2').map(prepareL457))
+         .filterDate(year_start, year_end)
+         .filterBounds(roi)
+         .select(opticalBands)
+         .map(calculateIndices)
+         .map(tcTrans)
+  
+  //************************************************************************************************************************************************
+  
+  var percentile = Landsat.reduce(ee.Reducer.percentile([25,50,75]))
+  
+  //print(percentile)
+  
+  //************************************************************************************************************************************************
+  
+  var Max = renameWithSuffix(Landsat.qualityMosaic('NDVI').select(opticalBands), '_NDVImax')
+  .addBands(renameWithSuffix(Landsat.qualityMosaic('MNDWI').select(opticalBands), '_MNDWImax'))
+  
+   //print(Max)
+    
+  //************************************************************************************************************************************************
+  
+  var std = Landsat.reduce(ee.Reducer.stdDev())
+    
+  //print(std)
+    
+  //************************************************************************************************************************************************
+  
+  var NDFI = renameWithSuffix(calcNDFI(percentile.select(['BLUE_p25','GREEN_p25','RED_p25','NIR_p25','SWIR1_p25','SWIR2_p25'])),'_25')
+     .addBands(renameWithSuffix(calcNDFI(percentile.select(['BLUE_p50','GREEN_p50','RED_p50','NIR_p50','SWIR1_p50','SWIR2_p50'])),'_50'))
+     .addBands(renameWithSuffix(calcNDFI(percentile.select(['BLUE_p75','GREEN_p75','RED_p75','NIR_p75','SWIR1_p75','SWIR2_p75'])),'_75'))
+    
+  //print(NDFI)
+    
+  //************************************************************************************************************************************************
+  
+  var ccdc = b1_CCD_1.merge(b1_CCD_2).merge(b1_CCD_3).mosaic()
+    
+  var Variables_break = ['GREEN', 'RED', 'NIR', 'SWIR1', 'SWIR2', 'NDVI', 'MNDWI', 'NBR'];
+    
+  var SEGS = ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19", "S20", "S21"];
+
+  var ccdImage = utils.CCDC.buildCcdImage(ccdc, SEGS.length, Variables_break);
+    
+  //************************************************************************************************************************************************
+    
+  var inputDate = year_ccd
+      
+  var dateParams = {inputFormat: 3, inputDate: inputDate, outputFormat: 1}
+      
+  var formattedDate = utils.Dates.convertDate(dateParams)
+      
+  //print(formattedDate)
+        
+  //************************************************************************************************************************************************
+    
+  var SELECT_COEFS = ["INTP", "SLP", "COS", "SIN", "COS2", "SIN2", "COS3", "SIN3", "RMSE"]
+    
+  var coefs = utils.CCDC.getMultiCoefs(ccdImage, formattedDate, Variables_break, SELECT_COEFS, false, SEGS, 'normal').unmask(utils.CCDC.getMultiCoefs(ccdImage, formattedDate, Variables_break, SELECT_COEFS, false, SEGS, 'after'))
+
+  var Temporal = utils.CCDC.newPhaseAmplitude(coefs, '.*SIN.*', '.*COS.*')
+                             .select(['GREEN_PHASE',     'RED_PHASE',     'NIR_PHASE',     'SWIR1_PHASE',     'SWIR2_PHASE',     'NDVI_PHASE',     'MNDWI_PHASE',     'NBR_PHASE',
+                                      'GREEN_AMPLITUDE', 'RED_AMPLITUDE', 'NIR_AMPLITUDE', 'SWIR1_AMPLITUDE', 'SWIR2_AMPLITUDE', 'NDVI_AMPLITUDE', 'MNDWI_AMPLITUDE', 'NBR_AMPLITUDE'])
+
+    
+  //print(Temporal)
+  
+  //************************************************************************************************************************************************
+  
+  var Texture = renameWithSuffix(percentile.select('NIR_p50').unitScale(0, 0.3).multiply(32).toInt().glcmTexture({size: 1}).select([0,1,2,3,4,8,14]).float(),'_W3')
+      .addBands(renameWithSuffix(percentile.select('NIR_p50').unitScale(0, 0.3).multiply(32).toInt().glcmTexture({size: 2}).select([0,1,2,3,4,8,14]).float(),'_W5'))
+      .addBands(renameWithSuffix(percentile.select('NIR_p50').unitScale(0, 0.3).multiply(32).toInt().glcmTexture({size: 3}).select([0,1,2,3,4,8,14]).float(),'_W7'))
+      .addBands(renameWithSuffix(percentile.select('NIR_p50').unitScale(0, 0.3).multiply(32).toInt().glcmTexture({size: 4}).select([0,1,2,3,4,8,14]).float(),'_W9'))
+    
+  //print(Texture)
+    
+  //************************************************************************************************************************************************
+  
+  var S1 = ee.ImageCollection('COPERNICUS/S1_GRD').filterDate(year_start, year_end).filterBounds(roi)
+          .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+          .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+          .filter(ee.Filter.eq('instrumentMode', 'IW'))
+          .filter(ee.Filter.eq('orbitProperties_pass', 'ASCENDING'))
+          .select('VV','VH')
+          .map(maskS1Edge)
+    
+  var Pol = (Number(year) >= 2015) ?
+          S1.reduce(ee.Reducer.percentile([5,95])).addBands(S1.reduce(ee.Reducer.intervalMean(5,95))).addBands(S1.reduce(ee.Reducer.stdDev())).clip(roi).multiply(100).toInt16():
+          null
+    
+  //print(Pol)
+    
+  //************************************************************************************************************************************************
+  
+  var soil = ee.Image("projects/xjd-1-457815/assets/A_CSJ_25/b/b1/soil_BD").  addBands(ee.Image("projects/xjd-1-457815/assets/A_CSJ_25/b/b1/soil_OC"))
+   .addBands(ee.Image("projects/xjd-1-457815/assets/A_CSJ_25/b/b1/soil_clay")).addBands(ee.Image("projects/xjd-1-457815/assets/A_CSJ_25/b/b1/soil_pH"))
+   .addBands(ee.Image("projects/xjd-1-457815/assets/A_CSJ_25/b/b1/soil_sand")).addBands(ee.Image("projects/xjd-1-457815/assets/A_CSJ_25/b/b1/soil_silt"))
+   .addBands(ee.Image("projects/xjd-1-457815/assets/A_CSJ_25/b/b1/soil_type"))
+    
+  //print(soil)
+    
+  //************************************************************************************************************************************************
+  
+  var QH =  ee.Image("projects/xjd-1-457815/assets/A_CSJ_25/b/b2/pre_" + year).rename('pre')
+  .addBands(ee.Image("projects/xjd-1-457815/assets/A_CSJ_25/b/b2/tmp_" + year).rename('tmp'))
+    
+  //print(QH)
+    
+  //************************************************************************************************************************************************
+  
+  var Variables = (Number(year) >= 2015) ?
+                  percentile.addBands(Max).addBands(NDFI).addBands(std).multiply(10000).toInt16().addBands(Texture).addBands(Temporal).addBands(QH).addBands(soil).addBands(terrains).addBands(lonlat).addBands(Pol) :
+                  percentile.addBands(Max).addBands(NDFI).addBands(std).multiply(10000).toInt16().addBands(Texture).addBands(Temporal).addBands(QH).addBands(soil).addBands(terrains).addBands(lonlat)
+    
+  //print(Variables)
+    
+  //************************************************************************************************************************************************
+  
+  var stats_feature = ee.Feature(stats.first()).toDictionary();  // 读取 min/max 字典
+    
+  var normalizedVariables = normalizeImage(Variables, stats_feature);
+    
+  //Map.addLayer(normalizedVariables)
+    
+  //************************************************************************************************************************************************
+  
+  allLevels.forEach(function(item) {
+    
+    var field = item.field;
+    var labelName = item.labelName;
+    var L_bandname = item.L_bandname;
+    var values = item.values;
+    
+    //************************************************************************************************************************************************
+    
+    var training_filtered = values.length > 0 ?
+        training.filter(ee.Filter.inList(labelName, values)) :
+        training;
+    
+    var training_GYH_filtered = values.length > 0 ?
+        training_GYH.filter(ee.Filter.inList(labelName, values)) :
+        training_GYH;
+    
+    //print('training_' + field + '_' +  year,     training_filtered.size());
+    //print('training_GYH_' + field + '_' +  year, training_GYH_filtered.size());
+    
+    //************************************************************************************************************************************************
+    
+    var RF = ee.Classifier.smileRandomForest({numberOfTrees: 200, seed: 42})
+               .train({features: training_filtered, classProperty: labelName, inputProperties: L_bandname}).setOutputMode('MULTIPROBABILITY');
+    
+    //var importance = ee.Dictionary(RF.explain().get('importance'));
+    
+    //print('Variable importance_' + field + '_' +  year,     importance);
+      
+    //************************************************************************************************************************************************
+    
+    var GTB = ee.Classifier.smileGradientTreeBoost({numberOfTrees: 160, shrinkage: 0.1, samplingRate: 0.75, maxNodes: 5, seed: 42})
+                .train({features: training_filtered, classProperty: labelName, inputProperties: L_bandname}).setOutputMode('MULTIPROBABILITY');
+    
+    //************************************************************************************************************************************************
+    
+    var SVM = ee.Classifier.libsvm({kernelType: 'RBF', gamma: 0.25, cost: 128})
+                .train({features: training_GYH_filtered, classProperty: labelName, inputProperties: L_bandname}).setOutputMode('MULTIPROBABILITY');
+    
+    //************************************************************************************************************************************************
+    
+    var RF_pred =  Variables.select(L_bandname).classify(RF);
+    var GTB_pred = Variables.select(L_bandname).classify(GTB);
+    var SVM_pred = normalizedVariables.select(L_bandname).classify(SVM);
+    
+    var integrated = RF_pred.add(GTB_pred).add(SVM_pred).divide(3).rename(field);
+    
+    resultDict[field] = integrated;
+    
+    //Map.addLayer(integrated)
+      
+    //************************************************************************************************************************************************
+    
+  })
+  
+  var L1 =  resultDict['L1'].arrayArgmax().arrayGet([0]).remap([0, 1, 2], [0, 1, 2]);
+  
+  var L2A = resultDict['L2A'].arrayArgmax().arrayGet([0]).remap([0, 1], [3, 4]);
+  var L2B = resultDict['L2B'].arrayArgmax().arrayGet([0]).remap([0, 1], [5, 6]);
+  
+  var L3 =  resultDict['L3'].arrayArgmax().arrayGet([0]).remap([0, 1], [7, 8]);
+  
+  var L4A = resultDict['L4A'].arrayArgmax().arrayGet([0]).remap([0, 1, 2], [9, 10, 11]);
+  var L4B = resultDict['L4B'].arrayArgmax().arrayGet([0]).remap([0, 1], [12, 13]);
+  var L4C = resultDict['L4C'].arrayArgmax().arrayGet([0]).remap([0, 1], [14, 15]);
+  var L4D = resultDict['L4D'].arrayArgmax().arrayGet([0]).remap([0, 1], [16, 17]);
+  
+  //Map.addLayer(L2A)
+  
+  //************************************************************************************************************************************************
+
+  var YRD_EM_50 =   L1.eq(0).remap([0, 1], [0, 50]);
+  var YRD_EM_11 =   L1.eq(1).add(L2A.eq(3)).add(L3.eq(7)).add(L4A.eq(9)).eq(4).remap([0, 1], [0, 11]);
+  var YRD_EM_12 =   L1.eq(1).add(L2A.eq(3)).add(L3.eq(7)).add(L4A.eq(10)).eq(4).remap([0, 1], [0, 12]);
+  var YRD_EM_20 =   L1.eq(1).add(L2A.eq(3)).add(L3.eq(7)).add(L4A.eq(11)).eq(4).remap([0, 1], [0, 20]);
+  var YRD_EM_30 =   L1.eq(1).add(L2A.eq(3)).add(L3.eq(8)).add(L4B.eq(12)).eq(4).remap([0, 1], [0, 30]);
+  var YRD_EM_412 =  L1.eq(1).add(L2A.eq(3)).add(L3.eq(8)).add(L4B.eq(13)).eq(4).remap([0, 1], [0, 412]);
+  var YRD_EM_70 =   L1.eq(1).add(L2A.eq(4)).add(L4C.eq(14)).eq(3).remap([0, 1], [0, 70]);
+  var YRD_EM_81 =   L1.eq(1).add(L2A.eq(4)).add(L4C.eq(15)).eq(3).remap([0, 1], [0, 81]);
+  var YRD_EM_411 =  L1.eq(2).add(L2B.eq(5)).add(L4D.eq(16)).eq(3).remap([0, 1], [0, 411]);
+  var YRD_EM_62 =   L1.eq(2).add(L2B.eq(5)).add(L4D.eq(17)).eq(3).remap([0, 1], [0, 62]);
+  var YRD_EM_63 =   L1.eq(2).add(L2B.eq(6)).eq(2).remap([0, 1], [0, 63]);
+  
+  var YRD_EM = YRD_EM_50.add(YRD_EM_11).add(YRD_EM_12).add(YRD_EM_20).add(YRD_EM_30).add(YRD_EM_412).add(YRD_EM_70).add(YRD_EM_81).add(YRD_EM_411)
+               .add(YRD_EM_62).add(YRD_EM_63);
+               
+ Map.addLayer(YRD_EM)
+  
+  //************************************************************************************************************************************************
+  
+  Export.image.toDrive({
+    image: YRD_EM, 
+    scale: 30, 
+    region: roi, 
+    description: 'YRD_EMD_' + year, 
+    folder: "YRD_EMD", 
+    crs: "EPSG:4326", 
+    maxPixels: 1e13
+  });
+  
+  //************************************************************************************************************************************************
+  
+}
+
+
+var bandDict = {
+  "after_2015": {
+    L1:  L1_bandname,
+    L2A: L2A_bandname,
+    L2B: L2B_bandname,
+    L3:  L3_bandname,
+    L4A: L4A_bandname,
+    L4B: L4B_bandname,
+    L4C: L4C_bandname,
+    L4D: L4D_bandname
+  },
+  "before_2015": {
+    L1:  removeRadarBands(L1_bandname),
+    L2A: removeRadarBands(L2A_bandname),
+    L2B: removeRadarBands(L2B_bandname),
+    L3:  removeRadarBands(L3_bandname),
+    L4A: removeRadarBands(L4A_bandname),
+    L4B: removeRadarBands(L4B_bandname),
+    L4C: removeRadarBands(L4C_bandname),
+    L4D: removeRadarBands(L4D_bandname)
+  }
+};
+
+//************************************************************************************************************************************************
+
+var config = [
+  
+  {year:2020, band:'after_2015'},
+  {year:2010, band:'before_2015'},
+  {year:2000, band:'before_2015'},
+  {year:1990, band:'before_2015'},
+
+  {year:2015, band:'after_2015'},
+  {year:2005, band:'before_2015'},
+  {year:1995, band:'before_2015'},
+  {year:1985, band:'before_2015'},
+    
+  {year:2024, band:'after_2015'},
+  {year:2023, band:'after_2015'},
+  {year:2022, band:'after_2015'},
+  {year:2021, band:'after_2015'},
+  {year:2019, band:'after_2015'},
+  {year:2018, band:'after_2015'},
+  {year:2017, band:'after_2015'},
+  {year:2016, band:'after_2015'},
+
+];
+
+//************************************************************************************************************************************************
+
+config.forEach(function(c) {
+  
+  var bands = bandDict[c.band];
+
+  runModelSet(
+    c.year,
+    [
+      {field:'L1',  labelName:'L1', L_bandname:bands.L1,  values:[]},
+      {field:'L2A', labelName:'L2', L_bandname:bands.L2A, values:[3,4]},
+      {field:'L2B', labelName:'L2', L_bandname:bands.L2B, values:[5,6]},
+      {field:'L3',  labelName:'L3', L_bandname:bands.L3,  values:[7,8]},
+      {field:'L4A', labelName:'L4', L_bandname:bands.L4A, values:[9,10,11]},
+      {field:'L4B', labelName:'L4', L_bandname:bands.L4B, values:[12,13]},
+      {field:'L4C', labelName:'L4', L_bandname:bands.L4C, values:[14,15]},
+      {field:'L4D', labelName:'L4', L_bandname:bands.L4D, values:[16,17]}
+    ]
+  );
+});
+
+//************************************************************************************************************************************************
+
